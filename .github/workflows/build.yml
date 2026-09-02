@@ -1,0 +1,44 @@
+name: build schedule
+
+on:
+  schedule:
+    - cron: "17 9 * * 1"   # Mondays, 09:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-schedule
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - run: uv sync --frozen
+      - run: uv run playwright install --with-deps chromium
+
+      - id: scrape
+        run: uv run python -m alsched.main
+        continue-on-error: true
+
+      - name: commit & push
+        run: |
+          git config user.name "schedule-bot"
+          git config user.email "schedule-bot@users.noreply.github.com"
+          git add docs/
+          git diff --cached --quiet || git commit -m "update schedule $(date -u +%F)"
+          git push
+
+      - name: flag scrape failure
+        if: steps.scrape.outcome != 'success'
+        run: |
+          echo "::error::one or more scrapers failed — see the 'scrape' step log"
+          exit 1

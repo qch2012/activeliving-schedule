@@ -1,0 +1,22 @@
+[project]
+name = "activeliving-schedule"
+version = "0.1.0"
+description = "Filtered view of University of Calgary Active Living drop-in schedules"
+requires-python = ">=3.12"
+dependencies = [
+    "httpx>=0.27",
+    "beautifulsoup4>=4.12",
+    "lxml>=5.0",
+    "jinja2>=3.1",
+    "icalendar>=6.0",
+    "playwright>=1.48",
+]
+
+[dependency-groups]
+dev = ["pytest>=8.0"]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
