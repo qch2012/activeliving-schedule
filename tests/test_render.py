@@ -99,6 +99,60 @@ def test_html_shows_failures():
     assert "Oval running: TimeoutError: boom" in page
 
 
+def _track(day, sh, eh, sub):
+    return Session(
+        "Drop In - Running", "Kinesiology Track",
+        datetime(2026, 9, day, sh, 0, tzinfo=TZ),
+        datetime(2026, 9, day, eh, 0, tzinfo=TZ), "gym_track", sub,
+    )
+
+
+def test_same_time_lane_siblings_merge_to_one_chip():
+    page = html_page(
+        [_track(6, 8, 20, "Kin Track 1-2"), _track(6, 8, 20, "Kin Track 3-6")], {}, NOW
+    )
+    assert page.count('<span class="cv">Kin Track / 1-6</span>') == 1   # one chip
+    assert "Kin Track / 1-2" not in page and "Kin Track / 3-6" not in page
+    assert "· Kin Track / 1-6" in page                                  # list row too
+
+
+def test_lane_siblings_with_different_times_stay_split():
+    page = html_page(
+        [_track(8, 6, 22, "Kin Track 1-2"), _track(8, 14, 22, "Kin Track 3-6")], {}, NOW
+    )
+    assert "Kin Track / 1-2" in page and "Kin Track / 3-6" in page
+    assert "Kin Track / 1-6" not in page
+
+
+def test_non_contiguous_lanes_render_as_comma_list():
+    page = html_page(
+        [_track(6, 8, 20, "Kin Track 1-2"), _track(6, 8, 20, "Kin Track 5-6")], {}, NOW
+    )
+    assert "Kin Track / 1-2, 5-6" in page
+
+
+def test_standalone_siblings_merge_without_venue_prefix():
+    def g(sub):
+        return Session(
+            "Open Gym", "Kinesiology Gym",
+            datetime(2026, 9, 6, 10, 0, tzinfo=TZ),
+            datetime(2026, 9, 6, 17, 0, tzinfo=TZ), "gym", sub,
+        )
+
+    page = html_page([g("Red Gym"), g("Gold Gym")], {}, NOW)
+    assert '<span class="cv">Red Gym, Gold Gym</span>' in page
+    assert "Kin Gym /" not in page
+
+
+def test_ics_feed_is_not_merged():
+    cal = Calendar.from_ical(
+        ics_feed(
+            [_track(6, 8, 20, "Kin Track 1-2"), _track(6, 8, 20, "Kin Track 3-6")], NOW
+        )
+    )
+    assert len(list(cal.walk("VEVENT"))) == 2
+
+
 def test_ics_round_trips_with_tz():
     cal = Calendar.from_ical(ics_feed(SESSIONS, NOW))
     events = list(cal.walk("VEVENT"))

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import html
+import re
 from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -58,6 +59,64 @@ def _place(s: Session) -> str:
     return f"{venue} / {sub}" if sub else venue
 
 
+def _merge_ranges(tails: list[str]) -> str:
+    """['1-2', '3-6'] -> '1-6'; ['1-2', '5-6'] -> '1-2, 5-6'. Callers guarantee
+    every tail is \\d+ or \\d+-\\d+."""
+    spans: list[list[int]] = []
+    for t in tails:
+        lo, _, hi = t.partition("-")
+        spans.append([int(lo), int(hi or lo)])
+    spans.sort()
+    out = [spans[0]]
+    for lo, hi in spans[1:]:
+        if lo <= out[-1][1] + 1:
+            out[-1][1] = max(out[-1][1], hi)
+        else:
+            out.append([lo, hi])
+    return ", ".join(str(lo) if lo == hi else f"{lo}-{hi}" for lo, hi in out)
+
+
+def _merge_places(places: list[str]) -> str:
+    """Combine the rendered place strings of same-time sibling sessions into one:
+    a shared '<venue> / ' prefix is shown once, numeric lane ranges are collapsed,
+    everything else is an ordered, de-duped comma list."""
+    uniq = list(dict.fromkeys(places))
+    if len(uniq) == 1:
+        return uniq[0]
+    split = [p.split(" / ", 1) for p in uniq]
+    if all(len(s) == 2 for s in split) and len({s[0] for s in split}) == 1:
+        prefix, tails = split[0][0] + " / ", [s[1] for s in split]
+    else:
+        prefix, tails = "", uniq
+    body = (
+        _merge_ranges(tails)
+        if all(re.fullmatch(r"\d+(-\d+)?", t) for t in tails)
+        else ", ".join(tails)
+    )
+    return prefix + body
+
+
+def _units(sessions: list[Session]) -> list[tuple[Session, str]]:
+    """Collapse sessions that share (activity, venue, start, end) into one render
+    unit: (representative session, place string). Only merges when every member
+    carries a sub-location; otherwise each renders on its own. Input is assumed
+    already sorted, so group members are contiguous and order is preserved."""
+    groups: dict = defaultdict(list)
+    for s in sessions:
+        groups[(s.activity, s.venue, s.start, s.end)].append(s)
+    out: list[tuple[Session, str]] = []
+    for members in groups.values():
+        mergeable = len(members) > 1 and all(
+            m.sublocation and m.sublocation not in config.SUBLOCATION_HIDE
+            for m in members
+        )
+        if mergeable:
+            out.append((members[0], _merge_places([_place(m) for m in members])))
+        else:
+            out.extend((m, _place(m)) for m in members)
+    return out
+
+
 def render(
     sessions: list[Session],
     failures: dict[str, str],
@@ -83,21 +142,22 @@ def _tail(place: str, disp: str, sep: str) -> str:
     return f'<span class="w">{sep}{_esc(place)}</span>'
 
 
-def _row(s: Session) -> str:
+def _row(s: Session, place: str | None = None) -> str:
     cat, emoji = _cat(s.activity)
     disp = _disp(s.activity)
+    place = _place(s) if place is None else place
     return (
         f'<li data-cat="{cat}">'
         f'<span class="t">{s.start:%H:%M}–{s.end:%H:%M}</span> {emoji} '
-        f'<span class="a">{_esc(disp)}</span>{_tail(_place(s), disp, " · ")}</li>'
+        f'<span class="a">{_esc(disp)}</span>{_tail(place, disp, " · ")}</li>'
     )
 
 
-def _chip(s: Session) -> str:
+def _chip(s: Session, place: str | None = None) -> str:
     cat, _ = _cat(s.activity)
     colour = config.ACTIVITY_COLOR.get(s.activity, cat)
     disp = _disp(s.activity)
-    place = _place(s)
+    place = _place(s) if place is None else place
     line3 = f'<span class="cv">{_esc(place)}</span>' if place and place != disp else ""
     return (
         f'<div class="chip cat-{colour}" data-cat="{cat}">'
@@ -149,10 +209,12 @@ def _week_grid(sessions: list[Session], now: datetime) -> str:
         for i in range(7):
             day = d + timedelta(days=i)
             chips = "".join(
-                _chip(s)
-                for s in sorted(
-                    by_date.get(day, []),
-                    key=lambda s: (s.start, s.end, s.activity),
+                _chip(s, place)
+                for s, place in _units(
+                    sorted(
+                        by_date.get(day, []),
+                        key=lambda s: (s.start, s.end, s.activity, s.venue),
+                    )
                 )
             )
             # "today" is highlighted client-side (see the script) so it stays
@@ -188,8 +250,10 @@ def html_page(
     day_sections = "".join(
         f'<section data-day="{d.isoformat()}"><h2>{d:%A %-d %B}</h2><ul>'
         + "".join(
-            _row(s)
-            for s in sorted(by_day[d], key=lambda s: (s.start, s.end, s.activity))
+            _row(s, place)
+            for s, place in _units(
+                sorted(by_day[d], key=lambda s: (s.start, s.end, s.activity, s.venue))
+            )
         )
         + "</ul></section>"
         for d in sorted(by_day)
