@@ -155,9 +155,10 @@ def _week_grid(sessions: list[Session], now: datetime) -> str:
                     key=lambda s: (s.start, s.end, s.activity),
                 )
             )
-            cls = "col is-today" if day == today else "col"
+            # "today" is highlighted client-side (see the script) so it stays
+            # correct between the weekly rebuilds.
             cols.append(
-                f'<div class="{cls}" data-date="{day.isoformat()}">'
+                f'<div class="col" data-date="{day.isoformat()}">'
                 f'<div class="colh">{day:%a %-d}</div>'
                 f'<div class="chips">{chips}</div></div>'
             )
@@ -308,10 +309,14 @@ _PAGE = """<!doctype html>
   var weeks = [].slice.call(document.querySelectorAll("#view-cal .week"));
   var cols = [].slice.call(document.querySelectorAll("#view-cal .col"));
   var allDates = cols.map(function (c) { return c.getAttribute("data-date"); });
-  var todayCol = document.querySelector("#view-cal .col.is-today");
-  var today = todayCol ? todayCol.getAttribute("data-date") : (allDates[0] || null);
   var minDate = allDates[0], maxDate = allDates[allDates.length - 1];
-  if (!st.anchor || allDates.indexOf(st.anchor) < 0) st.anchor = today || minDate;
+  // real today, in Calgary time, computed in the browser so it stays right
+  // between the weekly rebuilds
+  var today = new Date().toLocaleDateString("en-CA", {timeZone: "America/Edmonton"});
+  function todayAnchor() {
+    return allDates.indexOf(today) >= 0 ? today : (today > maxDate ? maxDate : minDate);
+  }
+  if (!st.anchor || allDates.indexOf(st.anchor) < 0) st.anchor = todayAnchor();
 
   function narrow() { return window.matchMedia("(max-width: 700px)").matches; }
   function mondayOf(iso) {
@@ -345,7 +350,9 @@ _PAGE = """<!doctype html>
     var nd = narrow(), mon = mondayOf(st.anchor);
     weeks.forEach(function (w) { w.hidden = w.getAttribute("data-monday") !== mon; });
     cols.forEach(function (c) {
-      c.hidden = nd && c.getAttribute("data-date") !== st.anchor;
+      var d = c.getAttribute("data-date");
+      c.hidden = nd && d !== st.anchor;
+      c.classList.toggle("is-today", d === today);
     });
 
     var scope = nd
@@ -362,7 +369,7 @@ _PAGE = """<!doctype html>
         : "Week of " + new Date(mon + "T00:00").toLocaleDateString(undefined, opt);
     }
     var tb = document.getElementById("nav-today");
-    if (tb) tb.hidden = st.view !== "cal" || st.anchor === (today || minDate);
+    if (tb) tb.hidden = st.view !== "cal" || st.anchor === todayAnchor();
   }
 
   function step(dir) {
@@ -390,7 +397,7 @@ _PAGE = """<!doctype html>
       tday = document.getElementById("nav-today");
   if (prev) prev.addEventListener("click", function () { step(-1); });
   if (next) next.addEventListener("click", function () { step(1); });
-  if (tday) tday.addEventListener("click", function () { st.anchor = today || minDate; save(); render(); });
+  if (tday) tday.addEventListener("click", function () { st.anchor = todayAnchor(); save(); render(); });
   var t;
   window.addEventListener("resize", function () { clearTimeout(t); t = setTimeout(render, 150); });
 

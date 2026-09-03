@@ -44,9 +44,12 @@ def test_html_week_grid_and_chip_layout():
     assert 'id="view-cal"' in page and 'id="view-list"' in page
     assert 'data-view="cal"' in page and 'data-view="list"' in page
     assert '<div class="week" data-monday="2026-08-31">' in page
-    assert 'data-date="2026-09-02"' in page and "is-today" in page
     assert 'data-cat="gym"' in page and 'data-cat="swim"' in page
     assert 'id="nav-prev"' in page and 'id="nav-next"' in page
+    # "today" is highlighted in the browser, not baked in at build time
+    assert '<div class="col" data-date="2026-09-02">' in page
+    assert 'toLocaleDateString("en-CA", {timeZone: "America/Edmonton"})' in page
+    assert 'classList.toggle("is-today"' in page
 
     # calendar chip: three stacked lines, no emoji
     chip = re.search(r'<div class="chip [^"]*" data-cat="gym">(.*?)</div>', page).group(1)
